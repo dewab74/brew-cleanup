@@ -24,7 +24,9 @@ Run the executable directly. `brew cleanup` is Homebrew's own cache-cleaning
 command, and is unrelated to this tool. Keep the launcher alongside `brew_cleanup.py`.
 
 - Type to filter installed packages by name or type.
-- Press **Tab** to mark packages; **Shift-Tab** marks and moves upward.
+- Use **Up/Down** to move through packages and **Space** to mark or unmark the current package.
+- **Tab** also toggles selection and moves downward; **Shift-Tab** toggles and moves upward.
+- Space is reserved for selection rather than entering spaces in the search query.
 - **Ctrl-A** selects all matches; **Ctrl-D** clears selection.
 - **Shift-Up/Down** scrolls the lower-right file list; the description stays visible.
 - **Enter** reviews marked packages, or the current package if none are marked.
