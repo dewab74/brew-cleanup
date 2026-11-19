@@ -92,9 +92,19 @@ def locked():
 
 def preview(path, key):
     package = json.loads(Path(path).read_text())[key]
-    print(f"{package['name']} ({package['kind']})\nInstalled: {', '.join(package['versions'])}\n")
-    print(package["desc"] + "\n" + package["homepage"])
-    print("\nINSTALLED FILES / CASK ARTIFACTS\n", flush=True)
+    # Seven logical lines stay pinned while fzf scrolls the file list below.
+    # Let fzf wrap them to the preview width instead of truncating descriptions.
+    width = max(1, int(os.environ.get("FZF_PREVIEW_COLUMNS", "60")))
+    header = [
+        "DESCRIPTION",
+        f"{package['name']} ({package['kind']})",
+        "Installed: " + ", ".join(package["versions"]),
+        " ".join(package["desc"].split()),
+        " ".join(package["homepage"].split()),
+        "─" * width,
+        "FILES / CASK ARTIFACTS",
+    ]
+    print("\n".join(header), flush=True)
     brew("list", "--" + package["kind"], package["name"])
 
 
@@ -108,10 +118,7 @@ def select(packages):
             shlex.join([sys.executable, str(Path(__file__).resolve()), "_preview", str(path)])
             + " {1}"
         )
-        rows = [
-            f"{key}\t{p['name']} ({p['kind']})\t{' '.join(p['desc'].split())}"
-            for key, p in sorted(packages.items())
-        ]
+        rows = [f"{key}\t{p['name']} ({p['kind']})" for key, p in sorted(packages.items())]
         env = dict(os.environ, FZF_DEFAULT_OPTS="", FZF_DEFAULT_OPTS_FILE="")
         result = subprocess.run(
             [
@@ -120,12 +127,12 @@ def select(packages):
                 "--layout=reverse",
                 "--border",
                 "--delimiter=\t",
-                "--with-nth=2..",
+                "--with-nth=2",
                 "--preview",
                 command,
-                "--preview-window=right:60%:wrap",
+                "--preview-window=right:60%:wrap:~7",
                 "--bind=ctrl-a:select-all,ctrl-d:deselect-all",
-                "--header=Tab: mark | Enter: review | Esc: cancel | Shift-Up/Down: scroll preview",
+                "--header=Tab: mark | Enter: review | Esc: cancel | Shift-Up/Down: scroll files",
                 "--prompt=Installed packages > ",
             ],
             input="\n".join(rows),

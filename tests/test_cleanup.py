@@ -163,7 +163,7 @@ class Transactions(unittest.TestCase):
         ):
             self.assertEqual(app.select(self.before), ["formula:app"])
         self.assertIn("--multi", run.call_args.args[0])
-        self.assertIn("--preview-window=right:60%:wrap", run.call_args.args[0])
+        self.assertIn("--preview-window=right:60%:wrap:~7", run.call_args.args[0])
         result.returncode = 130
         with (
             patch.object(app.shutil, "which", return_value="fzf"),

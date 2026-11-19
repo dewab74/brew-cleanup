@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/github/license/dewab74/brew-cleanup)](LICENSE)
 
 An fzf interface for removing installed Homebrew packages, with a searchable
-package list, a description and file preview on the right, and a timestamped
+package list, a fixed description above a scrolling file list on the right, and a timestamped
 history you can use to reinstall what was removed.
 
 Supports formulae and casks on macOS, and formulae on Linux. Requires Python 3.9+
@@ -23,14 +23,17 @@ brew install fzf  # if needed
 Run the executable directly. `brew cleanup` is Homebrew's own cache-cleaning
 command, and is unrelated to this tool. Keep the launcher alongside `brew_cleanup.py`.
 
-- Type to filter installed packages by name or description.
+- Type to filter installed packages by name or type.
 - Press **Tab** to mark packages; **Shift-Tab** marks and moves upward.
 - **Ctrl-A** selects all matches; **Ctrl-D** clears selection.
-- **Shift-Up/Down** scrolls the right preview.
+- **Shift-Up/Down** scrolls the lower-right file list; the description stays visible.
 - **Enter** reviews marked packages, or the current package if none are marked.
 - **Esc** cancels. The final prompt defaults to **No**.
 
-The preview shows installed versions, description, homepage, and `brew list` output.
+The left pane shows package names and types only. The right pane has two sections:
+a fixed description section with installed versions and homepage above a divider,
+and a scrolling `brew list` file section below it. This uses fzf's fixed preview header,
+so no additional terminal UI dependency is needed.
 For casks, Homebrew lists installed artifacts rather than every file inside an app bundle.
 Your global fzf options are ignored so custom bindings cannot alter this interface.
 

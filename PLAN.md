@@ -11,8 +11,8 @@ The implementation checklist and known verification gaps live in [TODO.md](TODO.
 | Requirement | Implementation |
 | --- | --- |
 | Installed packages only | `brew info --json=v2 --installed`; formula and cask identities stay distinct. |
-| Mark one or more packages | fzf multi-select with searchable names and descriptions. |
-| Right-hand details | Cached description/version/homepage plus on-demand `brew list`. |
+| Mark one or more packages | fzf multi-select with searchable names and types. |
+| Right-hand details | Fixed description/version/homepage above a scrolling `brew list` section. |
 | Uninstall and autoremove | Review commands, confirm, uninstall by kind, then explicit autoremove. |
 | Track what and when | Before/after inventories, UTC timestamps, command progress, actual removals. |
 | Undo | Reinstall missing packages from a removal transaction; journal each attempt. |
