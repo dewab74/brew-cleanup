@@ -98,7 +98,8 @@ make check
 `make test` runs isolated tests without changing real Homebrew packages. `make lint` runs
 Ruff, Markdown and shell linting, repository hygiene, gitleaks, and detect-secrets.
 Hooks run locally before commits; GitHub Actions repeats them as a backstop and tests
-Python 3.9 and 3.13 on macOS and Linux. Hook and action versions are pinned.
+Python 3.9 on Ubuntu 22.04 and Python 3.13 on current macOS and Ubuntu runners.
+Hook and action versions are pinned.
 
 See [PLAN.md](PLAN.md) for design decisions, [TODO.md](TODO.md) for verification and
 future work, and [SECURITY.md](SECURITY.md) for security reporting.

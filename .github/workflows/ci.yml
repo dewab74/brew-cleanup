@@ -7,9 +7,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.9', '3.13']
-        os: [ubuntu-latest, macos-latest]
+        include:
+          # Python 3.9 builds are unavailable on the latest Ubuntu image.
+          - python-version: '3.9'
+            os: ubuntu-22.04
+          - python-version: '3.13'
+            os: ubuntu-latest
+          - python-version: '3.13'
+            os: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
