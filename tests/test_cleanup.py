@@ -155,22 +155,6 @@ class Transactions(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             app.load_record("../../anything")
 
-    def test_fzf_selection_and_cancel(self):
-        result = subprocess.CompletedProcess([], 0, "formula:app\tapp (formula)\tExample\n")
-        with (
-            patch.object(app.shutil, "which", return_value="fzf"),
-            patch.object(subprocess, "run", return_value=result) as run,
-        ):
-            self.assertEqual(app.select(self.before), ["formula:app"])
-        self.assertIn("--multi", run.call_args.args[0])
-        self.assertIn("--preview-window=right:60%:wrap:~7", run.call_args.args[0])
-        result.returncode = 130
-        with (
-            patch.object(app.shutil, "which", return_value="fzf"),
-            patch.object(subprocess, "run", return_value=result),
-        ):
-            self.assertEqual(app.select(self.before), [])
-
     def test_save_is_private(self):
         path = Path(self.tmp.name) / "record.json"
         app.save(path, {"ok": True})

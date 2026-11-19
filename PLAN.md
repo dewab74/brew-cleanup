@@ -11,8 +11,8 @@ The implementation checklist and known verification gaps live in [TODO.md](TODO.
 | Requirement | Implementation |
 | --- | --- |
 | Installed packages only | `brew info --json=v2 --installed`; formula and cask identities stay distinct. |
-| Mark one or more packages | fzf multi-select with searchable names and types. |
-| Right-hand details | Fixed description/version/homepage above a scrolling `brew list` section. |
+| Mark one or more packages | Space multi-select with searchable names and types. |
+| Right-hand details | Separate scrollable boxes for description, files, and both dependency directions. |
 | Uninstall and autoremove | Review commands, confirm, uninstall by kind, then explicit autoremove. |
 | Track what and when | Before/after inventories, UTC timestamps, command progress, actual removals. |
 | Undo | Reinstall missing packages from a removal transaction; journal each attempt. |
@@ -21,11 +21,12 @@ The implementation checklist and known verification gaps live in [TODO.md](TODO.
 
 ## Decisions
 
-### Python standard library and fzf
+### Python standard library and curses
 
 Python handles structured Homebrew JSON, atomic history writes, subprocess argument arrays,
-and tests without runtime dependencies. fzf provides selection and preview without building
-a terminal renderer. The shell launcher only locates the Python script.
+and tests without third-party runtime dependencies. A curses browser provides three
+independently bordered and scrollable detail boxes. Space marks packages, Tab cycles focus,
+and typing filters names/types with subsequence matching. The shell launcher locates Python.
 
 Descriptions are fetched once per selection session. File lists are queried only when a
 package is highlighted. A second inventory is taken after selection, before removal.
@@ -33,8 +34,8 @@ package is highlighted. A second inventory is taken after selection, before remo
 ### Explicit mutation boundary
 
 Preview and dry-run do not mutate packages. Review precedes a default-no confirmation.
-Commands use argument arrays, not shell interpolation; the fzf preview shell command uses
-quoted interpreter/script/cache paths and fzf's quoted field placeholder.
+Commands use argument arrays, not shell interpolation. File previews run in a single background
+worker with a timeout. Dependency trees use direct installed runtime edges and their inverse.
 Formulae and casks are explicitly typed, including packages with the same short name.
 
 Disable Homebrew's implicit autoremove and install cleanup. Run autoremove once explicitly
@@ -68,5 +69,5 @@ are deferred until the source-based workflow has been exercised.
 
 Test selection/cancellation, dry-run, typed commands, autoremove accounting, partial failures,
 interruptions, failed snapshots/recovery, undo idempotence, and concurrent invocation.
-Use mocked Homebrew for mutations. Read-only inventory and real fzf dry-run can be exercised
+Use mocked Homebrew for mutations. Read-only inventory and real terminal dry-run can be exercised
 against the host without uninstalling anything. CI covers macOS and Linux.

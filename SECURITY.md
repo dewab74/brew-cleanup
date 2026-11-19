@@ -18,6 +18,6 @@ The tool sends no telemetry and stores history locally. Homebrew itself may cont
 its normal services during reinstall. The history contains package names, versions,
 installation metadata, and local paths; keep it private and outside source control.
 
-All package commands use subprocess argument arrays. Shell quoting is limited to fzf's
-preview command. Do not run this tool as root or against an untrusted Homebrew installation.
+All package commands use subprocess argument arrays. The browser replaces control characters
+in displayed text. Do not run this tool as root or against an untrusted Homebrew installation.
 See [PLAN.md](PLAN.md) for the mutation boundary and recovery design.

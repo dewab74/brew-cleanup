@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select installed Homebrew packages with fzf and journal removals."""
+"""Select installed Homebrew packages in a terminal browser and journal removals."""
 
 import argparse
 import contextlib
@@ -15,6 +15,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import package_browser
+
 
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
@@ -24,7 +26,7 @@ def state_dir():
     return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "brew-cleanup"
 
 
-def brew(*args, capture=False):
+def brew(*args, capture=False, timeout=None):
     env = dict(
         os.environ,
         HOMEBREW_NO_AUTO_UPDATE="1",
@@ -32,7 +34,13 @@ def brew(*args, capture=False):
         HOMEBREW_NO_AUTOREMOVE="1",
     )
     return subprocess.run(
-        ["brew", *args], env=env, text=True, check=True, stdout=subprocess.PIPE if capture else None
+        ["brew", *args],
+        env=env,
+        text=True,
+        check=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.STDOUT if capture else None,
+        timeout=timeout,
     )
 
 
@@ -90,60 +98,13 @@ def locked():
         yield
 
 
-def preview(path, key):
-    package = json.loads(Path(path).read_text())[key]
-    # Seven logical lines stay pinned while fzf scrolls the file list below.
-    # Let fzf wrap them to the preview width instead of truncating descriptions.
-    width = max(1, int(os.environ.get("FZF_PREVIEW_COLUMNS", "60")))
-    header = [
-        "DESCRIPTION",
-        f"{package['name']} ({package['kind']})",
-        "Installed: " + ", ".join(package["versions"]),
-        " ".join(package["desc"].split()),
-        " ".join(package["homepage"].split()),
-        "─" * width,
-        "FILES / CASK ARTIFACTS",
-    ]
-    print("\n".join(header), flush=True)
-    brew("list", "--" + package["kind"], package["name"])
-
-
 def select(packages):
-    if not shutil.which("fzf"):
-        raise RuntimeError("fzf is required: brew install fzf")
-    with tempfile.TemporaryDirectory(prefix="brew-cleanup-") as tmp:
-        path = Path(tmp) / "packages.json"
-        save(path, packages)
-        command = (
-            shlex.join([sys.executable, str(Path(__file__).resolve()), "_preview", str(path)])
-            + " {1}"
-        )
-        rows = [f"{key}\t{p['name']} ({p['kind']})" for key, p in sorted(packages.items())]
-        env = dict(os.environ, FZF_DEFAULT_OPTS="", FZF_DEFAULT_OPTS_FILE="")
-        result = subprocess.run(
-            [
-                "fzf",
-                "--multi",
-                "--layout=reverse",
-                "--border",
-                "--delimiter=\t",
-                "--with-nth=2",
-                "--preview",
-                command,
-                "--preview-window=right:60%:wrap:~7",
-                "--bind=space:toggle,ctrl-a:select-all,ctrl-d:deselect-all",
-                "--header=Space: mark/unmark | Enter: review | Esc: cancel | Shift-Up/Down: scroll files",
-                "--prompt=Installed packages > ",
-            ],
-            input="\n".join(rows),
-            text=True,
-            stdout=subprocess.PIPE,
-            env=env,
-        )
-        if result.returncode in (1, 130):
-            return []
-        result.check_returncode()
-        return [line.split("\t", 1)[0] for line in result.stdout.splitlines()]
+    def load_files(package):
+        return brew(
+            "list", "--" + package["kind"], package["name"], capture=True, timeout=15
+        ).stdout.splitlines()
+
+    return package_browser.select(packages, load_files)
 
 
 def confirm():
@@ -299,9 +260,6 @@ def main():
     for name in ("undo", "recover"):
         cmd = sub.add_parser(name)
         cmd.add_argument("id")
-    internal = sub.add_parser("_preview", help="internal preview helper")
-    internal.add_argument("path")
-    internal.add_argument("key")
     args = parser.parse_args()
     if args.dry_run and args.command:
         parser.error("--dry-run is only supported for package selection")
@@ -317,9 +275,7 @@ def main():
         return
     if not shutil.which("brew"):
         raise RuntimeError("Homebrew is required and must be on PATH.")
-    if args.command == "_preview":
-        preview(args.path, args.key)
-    elif args.command == "undo":
+    if args.command == "undo":
         undo(args.id)
     elif args.command == "recover":
         recover(args.id)
