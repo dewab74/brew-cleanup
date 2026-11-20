@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import brew_cleanup as app
+from popup_process import CommandRunner
 
 
 def package(name, kind="formula"):
@@ -65,6 +66,28 @@ class Transactions(unittest.TestCase):
         self.assertEqual(self.record()["status"], "interrupted")
         self.assertEqual(self.record()["removed"], self.before)
 
+    def test_ui_cancel_is_recorded_as_interrupted(self):
+        runner = CommandRunner(lambda text: None)
+        runner.cancelled.set()
+        with patch.object(app, "inventory", return_value={}):
+            with self.assertRaises(subprocess.CalledProcessError):
+                app.transact("remove", self.before, [], [["uninstall"]], run_command=runner)
+        self.assertEqual(self.record()["status"], "interrupted")
+
+    def test_successful_removal_summary_is_printed_after_browser(self):
+        def browse(packages, actions, **options):
+            plan = actions.prepare("remove", ["formula:app"])
+            actions.execute(plan, lambda *args: None, lambda text: None)
+
+        with (
+            patch.object(app, "select", side_effect=browse),
+            patch.object(app, "inventory", side_effect=[self.before, self.before, {}]),
+            patch("builtins.print") as stdout,
+        ):
+            app.remove(theme="terminal")
+        stdout.assert_called_once()
+        self.assertIn("Undo: brew-cleanup undo " + self.record()["id"], stdout.call_args.args[0])
+
     def test_snapshot_failure_can_be_recovered(self):
         with (
             patch.object(app, "brew"),
@@ -96,38 +119,38 @@ class Transactions(unittest.TestCase):
         self.assertEqual(transact.call_args.args[3], [["install", "--cask", "app"]])
         self.assertEqual(transact.call_args.kwargs, {"source": "test"})
 
-    def test_dry_run_never_mutates(self):
-        with (
-            patch.object(app, "inventory", return_value=self.before),
-            patch.object(app, "select", return_value=["formula:app"]),
-        ):
-            with patch.object(app, "brew") as brew, patch.object(app, "confirm") as confirm:
-                app.remove(dry_run=True)
-        brew.assert_not_called()
-        confirm.assert_not_called()
+    def test_browser_receives_dry_run_and_theme(self):
+        with patch.object(app, "select") as select:
+            app.remove(dry_run=True, theme="catppuccin-latte")
+        self.assertTrue(select.call_args.kwargs["dry_run"])
+        self.assertEqual(select.call_args.kwargs["theme"], "catppuccin-latte")
+        self.assertIsInstance(select.call_args.kwargs["actions"], app.UIActions)
+
+    def test_review_does_not_mutate_or_write_history(self):
+        with patch.object(app, "inventory", return_value=self.before):
+            plan = app.UIActions().prepare("remove", ["formula:app"])
+        self.assertEqual(plan["commands"], [["uninstall", "--formula", "app"], ["autoremove"]])
         self.assertEqual(app.records(), [])
 
-    def test_cancel_never_mutates(self):
-        with (
-            patch.object(app, "inventory", return_value=self.before),
-            patch.object(app, "select", return_value=[]),
-        ):
-            with patch.object(app, "brew") as brew:
-                app.remove()
-        brew.assert_not_called()
+    def test_changed_inventory_blocks_execution(self):
+        with patch.object(app, "inventory", return_value=self.before):
+            plan = app.UIActions().prepare("remove", ["formula:app"])
+        with patch.object(app, "inventory", return_value={}):
+            with self.assertRaisesRegex(RuntimeError, "changed since review"):
+                app.UIActions().execute(plan, lambda *args: self.fail("Unexpected command"), print)
         self.assertEqual(app.records(), [])
 
-    def test_declined_confirmation_never_mutates(self):
-        with (
-            patch.object(app, "inventory", return_value=self.before),
-            patch.object(app, "select", return_value=["formula:app"]),
-        ):
-            with (
-                patch.object(app, "confirm", return_value=False),
-                patch.object(app, "transact") as transact,
-            ):
-                app.remove()
-        transact.assert_not_called()
+    def test_ui_runner_is_journaled_without_printing(self):
+        with patch.object(app, "inventory", return_value=self.before):
+            plan = app.UIActions().prepare("remove", ["formula:app"])
+        commands, output = [], []
+        with patch.object(app, "inventory", side_effect=[self.before, {}]):
+            with patch("builtins.print") as stdout:
+                app.UIActions().execute(plan, lambda *args: commands.append(args), output.append)
+        stdout.assert_not_called()
+        self.assertEqual(commands, [("uninstall", "--formula", "app"), ("autoremove",)])
+        self.assertEqual(self.record()["removed"], self.before)
+        self.assertTrue(output)
 
     def test_lock_rejects_concurrent_operation(self):
         with app.locked(), self.assertRaises(RuntimeError), app.locked():
