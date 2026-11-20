@@ -178,7 +178,8 @@ def matches(query, text):
 
 
 def clean(text):
-    return "".join(char if char.isprintable() else " " for char in text)
+    # Homebrew metadata can be null; a missing value must never crash the browser.
+    return "".join(char if char.isprintable() else " " for char in str(text or ""))
 
 
 def wrapped(lines, width):

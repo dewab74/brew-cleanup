@@ -18,7 +18,7 @@ from pathlib import Path
 import package_browser
 import themes
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def now():
@@ -69,7 +69,7 @@ def inventory():
                 name=name,
                 versions=versions,
                 desc=item.get("desc") or "No description available.",
-                homepage=item.get("homepage", ""),
+                homepage=item.get("homepage") or "",  # Some casks report null.
                 metadata=item,
             )
     return packages
