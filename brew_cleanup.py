@@ -16,6 +16,9 @@ import uuid
 from pathlib import Path
 
 import package_browser
+import themes
+
+__version__ = "0.1.0"
 
 
 def now():
@@ -98,13 +101,13 @@ def locked():
         yield
 
 
-def select(packages):
+def select(packages, **options):
     def load_files(package):
         return brew(
             "list", "--" + package["kind"], package["name"], capture=True, timeout=15
         ).stdout.splitlines()
 
-    return package_browser.select(packages, load_files)
+    return package_browser.select(packages, load_files, **options)
 
 
 def confirm():
@@ -131,7 +134,7 @@ def load_record(identifier):
     return path, json.loads(path.read_text())
 
 
-def transact(action, before, selected, commands, source=None):
+def transact(action, before, selected, commands, source=None, run_command=None, emit=print):
     identifier = (
         dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     )
@@ -147,20 +150,19 @@ def transact(action, before, selected, commands, source=None):
         source=source,
     )
     save(path, record)  # Persist recovery information before any mutation.
-    print(f"History: {path}", flush=True)
+    emit(f"History: {path}")
     try:
         for command in commands:
             step = dict(argv=command, started_at=now(), status="running")
             record["commands"].append(step)
             save(path, record)
-            brew(*command)
+            (run_command or brew)(*command)
             step.update(status="complete", finished_at=now())
             save(path, record)
         record["status"] = "complete"
     except BaseException as exc:
-        record.update(
-            status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed", error=str(exc)
-        )
+        interrupted = isinstance(exc, KeyboardInterrupt) or getattr(exc, "interrupted", False)
+        record.update(status="interrupted" if interrupted else "failed", error=str(exc))
         if record["commands"]:
             record["commands"][-1].update(status=record["status"], finished_at=now())
         raise
@@ -182,35 +184,126 @@ def transact(action, before, selected, commands, source=None):
     return record
 
 
-def remove(dry_run=False):
-    packages = inventory()
-    if not packages:
-        print("No installed packages.")
-        return
-    selected = select(packages)
-    if not selected:
-        print("Nothing selected.")
-        return
-    with locked():
+def config_path():
+    return (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        / "brew-cleanup/config.json"
+    )
+
+
+def configured_theme():
+    try:
+        name = json.loads(config_path().read_text()).get("theme", themes.DEFAULT)
+    except (OSError, ValueError, AttributeError):
+        name = themes.DEFAULT
+    return name if name in themes.THEMES else themes.DEFAULT
+
+
+class UIActions:
+    def __init__(self):
+        self.summary = []  # Printed after the browser closes so IDs stay in scrollback.
+
+    def refresh(self):
+        return inventory()
+
+    def save_theme(self, name):
+        path = config_path()
+        try:
+            config = json.loads(path.read_text())
+        except (OSError, ValueError):
+            config = {}
+        if not isinstance(config, dict):
+            config = {}
+        save(path, {**config, "theme": name})  # Keep any other settings.
+
+    def history(self):
+        return [json.loads(path.read_text()) for path in records()]
+
+    def prepare(self, action, selected):
         before = inventory()
-        if any(key not in before for key in selected):
-            raise RuntimeError("Installed packages changed. Please run again.")
-        commands = commands_for([before[k] for k in selected], "uninstall") + [["autoremove"]]
-        print("\nSelected packages:")
-        for key in selected:
-            print("  " + key)
-        print("\nCommands:")
-        for command in commands:
-            print("  " + shlex.join(["brew", *command]))
-        print("Autoremove also removes ALL currently unused dependencies, including older orphans.")
-        if dry_run:
-            print("Dry run: no packages changed and no history written.")
-            return
-        if confirm():
-            record = transact("remove", before, selected, commands)
-            print(
-                f"Removed {len(record.get('removed', {}))} packages. Undo: ./brew-cleanup undo {record['id']}"
+        source = None
+        if action == "remove":
+            missing = set(selected) - before.keys()
+            if missing:
+                raise RuntimeError("Installed packages changed. Refresh the browser with F5.")
+            chosen = {key: before[key] for key in selected}
+            commands = commands_for(list(chosen.values()), "uninstall") + [["autoremove"]]
+            note = "Autoremove also removes ALL unused dependencies, including older orphans."
+        else:
+            source = selected
+            _, record = load_record(source)
+            if record["action"] != "remove":
+                raise RuntimeError("Select a removal transaction to undo or recover.")
+            if action == "recover":
+                if "removed" in record:
+                    raise RuntimeError("This transaction already has a final snapshot.")
+                chosen = {key: p for key, p in record["before"].items() if key not in before}
+                commands = []
+                note = "Record this comparison? Unrelated removals since this transaction may be included."
+            else:
+                if "removed" not in record:
+                    raise RuntimeError("Recover this transaction first (R in the history popup).")
+                chosen = {key: p for key, p in record["removed"].items() if key not in before}
+                commands = [["install", "--" + p["kind"], p["name"]] for p in chosen.values()]
+                note = "Reinstall current available versions. Existing packages are skipped."
+        return dict(
+            action=action,
+            before=before,
+            selected=chosen,
+            commands=commands,
+            source=source,
+            note=note,
+        )
+
+    def execute(self, plan, runner, emit):
+        with locked():
+            before = inventory()
+
+            def signature(packages):
+                return {key: p["versions"] for key, p in packages.items()}
+
+            if signature(before) != signature(plan["before"]):
+                raise RuntimeError(
+                    "Installed packages changed since review. Refresh and review again."
+                )
+            if plan["action"] == "recover":
+                path, record = load_record(plan["source"])
+                record.update(
+                    after=before, removed=plan["selected"], status="recovered", recovered_at=now()
+                )
+                save(path, record)
+                emit("Recovery saved. Use history to undo this removal.")
+                self.summary.append(
+                    f"Recovered {plan['source']}. Undo: brew-cleanup undo {plan['source']}"
+                )
+                return
+            record = transact(
+                plan["action"],
+                before,
+                list(plan["selected"]),
+                plan["commands"],
+                source=plan["source"],
+                run_command=runner,
+                emit=emit,
             )
+            emit(f"Completed. Removed {len(record['removed'])}; installed {len(record['added'])}.")
+            emit("Transaction: " + record["id"])
+            if plan["action"] == "remove":
+                self.summary.append(
+                    f"Removed {len(record['removed'])} packages. "
+                    f"Undo: brew-cleanup undo {record['id']}"
+                )
+            else:
+                self.summary.append(
+                    f"Reinstalled {len(record['added'])} packages ({record['id']})."
+                )
+
+
+def remove(dry_run=False, theme=None):
+    actions = UIActions()
+    select({}, actions=actions, dry_run=dry_run, theme=theme or configured_theme())
+    for line in actions.summary:
+        print(line)
 
 
 def undo(identifier):
@@ -252,8 +345,12 @@ def recover(identifier):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     parser.add_argument(
         "--dry-run", action="store_true", help="select and review without changing packages"
+    )
+    parser.add_argument(
+        "--theme", choices=list(themes.THEMES), help="override the saved color theme"
     )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("history", help="list transactions and removed packages")
@@ -280,7 +377,7 @@ def main():
     elif args.command == "recover":
         recover(args.id)
     else:
-        remove(args.dry_run)
+        remove(args.dry_run, args.theme)
 
 
 if __name__ == "__main__":

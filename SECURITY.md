@@ -14,9 +14,12 @@ This tool can uninstall software as your user. Incorrect selection, command inje
 or misleading/incomplete removal records are security-relevant bugs.
 Homebrew packages and cask uninstall scripts run under Homebrew's normal trust model.
 
-The tool sends no telemetry and stores history locally. Homebrew itself may contact
-its normal services during reinstall. The history contains package names, versions,
-installation metadata, and local paths; keep it private and outside source control.
+The tool sends no telemetry and stores history locally. Command output is held only in a
+bounded in-memory popup buffer. Input is forwarded to a private subprocess terminal and is
+not separately logged; password echo is controlled by the subprocess, as in a normal
+terminal. Homebrew itself may contact its normal services during reinstall. The history
+contains package names, versions, installation metadata, and local paths; keep it private
+and outside source control.
 
 All package commands use subprocess argument arrays. The browser replaces control characters
 in displayed text. Do not run this tool as root or against an untrusted Homebrew installation.

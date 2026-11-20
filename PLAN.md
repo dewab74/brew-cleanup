@@ -17,6 +17,8 @@ The implementation checklist and known verification gaps live in [TODO.md](TODO.
 | Track what and when | Before/after inventories, UTC timestamps, command progress, actual removals. |
 | Undo | Reinstall missing packages from a removal transaction; journal each attempt. |
 | Interrupted operation | Save before mutation; final snapshot on failure; explicit recovery after a hard kill. |
+| Themes | Persistent Mocha/Latte/terminal themes, semantic colors, graceful terminal fallbacks. |
+| Interactive operations | Popups for review, live output/input, results, history, undo, and recovery. |
 | Repo standards | README, PLAN, TODO, MIT license, Makefile, hooks, secret scanning, pinned CI, Dependabot. |
 
 ## Decisions
@@ -41,6 +43,21 @@ Formulae and casks are explicitly typed, including packages with the same short 
 Disable Homebrew's implicit autoremove and install cleanup. Run autoremove once explicitly
 so its failure is visible in the journal. Keep dependency protections and normal uninstall
 semantics. Stop on command failure, preserving partial results for undo.
+
+### Persistent interaction and command output
+
+The browser stays inside curses throughout review and execution. A background worker runs
+transactions while the UI thread draws progress and handles keyboard input. Commands run
+through a separate Python PTY helper, so they have their own controlling terminal and cannot
+draw over the browser. Cask authentication and other prompts accept input in the popup.
+Ctrl-C is forwarded to the command; the journal records failures and snapshots partial results.
+Output is bounded in memory and is not written to history; prompt input is never separately logged.
+The browser refreshes after successes and failures. The reviewed inventory is checked again
+under the operation lock before mutation. History, undo, and recovery are also popup-driven.
+
+Theme settings are separate from removal history. The default is Catppuccin Mocha; Latte and
+terminal colors are also available. Semantic styles support limited-color and monochrome
+terminals. The UI never reprograms the terminal palette.
 
 ### Journal and recovery
 

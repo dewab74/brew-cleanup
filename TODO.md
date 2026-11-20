@@ -12,6 +12,10 @@
 - [x] README, PLAN, security policy, MIT license, and development Makefile.
 - [x] Pinned pre-commit linting, two secret scanners, CI matrix, and Dependabot.
 
+- [x] Persistent interactive review, progress, results, history, undo, and recovery popups.
+- [x] Catppuccin Mocha/Latte and terminal themes with saved preferences.
+- [x] Live Homebrew output and prompt input inside a private pseudo-terminal.
+
 ## Validation
 
 - [x] Isolated tests of removal, autoremove, failure, interrupt, recovery, and undo.
@@ -23,7 +27,8 @@
 
 ## Follow-up ideas
 
-- [ ] Interactive history selection and selecting a subset of a transaction to restore.
+- [x] Interactive history selection.
+- [ ] Select a subset of a transaction to restore.
 - [x] Separate description, files, and dependency boxes with independent scrolling.
 - [x] Display runtime dependencies and reverse dependencies as trees.
 - [ ] Display estimated disk savings.

@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# One release at a time, and never cancel one that is half published.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Three jobs, so each piece runs with only the access it needs: the checks get a
+# read-only token, the build may publish a release, and only the last job, which
+# runs nothing but the reviewed formula script from main, holds the tap deploy key.
+jobs:
+  verify:
+    name: verify the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A release is only ever cut from history that is on main.
+      - name: Check the tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Check the tag matches __version__
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python -c 'import os, brew_cleanup; assert os.environ["TAG"] == "v" + brew_cleanup.__version__, "tag does not match __version__"'
+      # The README demo must show the release being cut: `make demo` stamps the
+      # version into the recording's title.
+      - name: Check the demo was recorded for this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'EOF'
+          import json, os, pathlib, sys
+          version = os.environ["TAG"].removeprefix("v")
+          header = json.loads(pathlib.Path("docs/demo.cast").read_text().splitlines()[0])
+          if not header.get("title", "").startswith(f"brew-cleanup {version}:"):
+              sys.exit(f"::error::docs/demo.cast is not recorded for {version}; run `make demo` and commit it")
+          for name in ("demo.gif", "demo.mp4"):
+              if not pathlib.Path("docs", name).is_file():
+                  sys.exit(f"::error::docs/{name} is missing; run `make demo` and commit it")
+          EOF
+      - run: python -m unittest discover -s tests -v
+      - run: pip install pre-commit==4.7.0
+      - run: pre-commit run --all-files
+
+  release:
+    name: build and publish
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # sign the provenance attestation
+      attestations: write # store the provenance attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: python scripts/build_release.py
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=()
+          case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$TAG" dist/*.tar.gz dist/checksums.txt \
+            --verify-tag --generate-notes "${prerelease[@]}"
+
+  # Users install from the dewab-org/custom tap. Writing to that repository
+  # needs its own credential: a deploy key with write access to the tap only,
+  # held in the TAP_DEPLOY_KEY secret of the homebrew-tap environment, which
+  # only admits v* tags.
+  tap:
+    name: update the dewab-org/custom tap
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: homebrew-tap
+    steps:
+      # main, so the formula is written by the reviewed script.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Render the formula and push it to the tap
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+          TAP_REPO: dewab-org/homebrew-custom
+          TAP_BRANCH: master
+          FORMULA: Formula/brew-cleanup.rb
+          # GitHub's published SSH host key (api.github.com/meta), pinned so the
+          # push cannot be diverted to anyone else.
+          GITHUB_HOST_KEY: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+        run: |
+          case "$TAG" in
+            *-*)
+              echo "$TAG is a pre-release; leaving the tap alone"
+              exit 0
+              ;;
+          esac
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "::warning::TAP_DEPLOY_KEY is not set; the tap was not updated"
+            exit 0
+          fi
+          new="${TAG#v}"
+
+          # The checksum comes from the release the previous job published.
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --dir "$RUNNER_TEMP"
+          python scripts/build_release.py --formula "$new" "$RUNNER_TEMP/checksums.txt" > "$RUNNER_TEMP/formula.rb"
+
+          ssh_dir="$RUNNER_TEMP/ssh"
+          (umask 077 && mkdir -p "$ssh_dir" && printf '%s\n' "$TAP_DEPLOY_KEY" > "$ssh_dir/key")
+          printf '%s\n' "$GITHUB_HOST_KEY" > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+          trap 'rm -rf "$ssh_dir"' EXIT
+
+          git clone --quiet --branch "$TAP_BRANCH" "git@github.com:${TAP_REPO}.git" "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in 1 2 3; do
+            git fetch --quiet origin "$TAP_BRANCH"
+            git reset --quiet --hard "origin/$TAP_BRANCH"
+
+            # Never move the tap backwards: a patch to an old line must not
+            # downgrade everyone who runs `brew upgrade`.
+            current="$(sed -n 's|.*/releases/download/v\([^/]*\)/.*|\1|p' "$FORMULA" 2>/dev/null | head -n 1)"
+            if [ -n "$current" ] && [ "$current" != "$new" ] &&
+              [ "$(printf '%s\n%s\n' "$current" "$new" | sort -V | tail -n 1)" = "$current" ]; then
+              echo "tap is at $current, which is newer than $new; leaving it alone"
+              exit 0
+            fi
+
+            mkdir -p Formula
+            cp "$RUNNER_TEMP/formula.rb" "$FORMULA"
+            git add "$FORMULA"
+            if git diff --cached --quiet; then
+              echo "tap already has brew-cleanup $new"
+              exit 0
+            fi
+            git commit --quiet --message "brew-cleanup $new"
+            if git push --quiet origin "HEAD:$TAP_BRANCH"; then
+              echo "pushed brew-cleanup $new to $TAP_REPO"
+              exit 0
+            fi
+            echo "push failed (attempt $attempt); the tap probably moved"
+            sleep 5
+          done
+          echo "::error::could not push brew-cleanup $new to $TAP_REPO"
+          exit 1
