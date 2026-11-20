@@ -152,6 +152,18 @@ class Transactions(unittest.TestCase):
         self.assertEqual(self.record()["removed"], self.before)
         self.assertTrue(output)
 
+    def test_inventory_tolerates_null_cask_metadata(self):
+        # `brew info --json=v2` reports "homepage": null for some casks (e.g. container).
+        data = dict(
+            formulae=[],
+            casks=[dict(token="container", installed="1.0", homepage=None, desc=None)],
+        )
+        result = subprocess.CompletedProcess([], 0, stdout=json.dumps(data))
+        with patch.object(app, "brew", return_value=result):
+            package = app.inventory()["cask:container"]
+        self.assertEqual(package["homepage"], "")
+        self.assertEqual(package["desc"], "No description available.")
+
     def test_lock_rejects_concurrent_operation(self):
         with app.locked(), self.assertRaises(RuntimeError), app.locked():
             pass

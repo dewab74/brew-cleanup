@@ -161,6 +161,10 @@ class CleanupGuidanceTests(unittest.TestCase):
         blockers, _ = ui.removal_impact(["formula:base"], self.packages, self.graphs)
         self.assertEqual(blockers, {"formula:base": ["formula:lib", "formula:other"]})
 
+    def test_null_metadata_renders(self):
+        self.assertEqual(ui.clean(None), "")
+        self.assertEqual(ui.wrapped(["a", None], 10), ["a", ""])
+
     def test_labels_hide_internal_keys(self):
         self.assertEqual(ui.label("formula:app", self.packages), "app")
         self.assertEqual(ui.label("cask:tool", self.packages), "tool (cask)")
